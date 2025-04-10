@@ -1,156 +1,117 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
 import sqlite3
-from datetime import datetime
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from tkinter import messagebox
+from tkinter import StringVar
 
-# Database Setup
-def init_db():
-    conn = sqlite3.connect('tasks.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    due_date TEXT,
-                    priority TEXT,
-                    status TEXT DEFAULT 'Pending')''')
+# Connect to SQLite
+conn = sqlite3.connect("tasks.db")
+cursor = conn.cursor()
+
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        description TEXT,
+        due_date TEXT,
+        priority TEXT,
+        status TEXT DEFAULT "Pending"
+    )
+''')
+conn.commit()
+
+# Functions
+def add_task():
+    title = title_var.get().strip()
+    description = desc_var.get().strip()
+    due_date = date_var.get().strip()
+    priority = priority_var.get()
+
+    if not title or not due_date:
+        messagebox.showwarning("Missing Info", "Title and Due Date are required!")
+        return
+
+    cursor.execute("INSERT INTO tasks (title, description, due_date, priority) VALUES (?, ?, ?, ?)",
+                   (title, description, due_date, priority))
     conn.commit()
-    conn.close()
+    refresh_tasks()
 
-# Task Manager Class
-class TaskManager:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Smart Task Manager")
-        self.root.geometry("1000x600")
-        self.root.resizable(False, False)
+def delete_task():
+    selected = tree.selection()
+    if not selected:
+        messagebox.showinfo("Select", "Please select a task to delete.")
+        return
 
-        self.style = ttk.Style()
-        self.style.configure("Treeview", font=("Segoe UI", 10), rowheight=25)
-        self.style.configure("Treeview.Heading", font=("Segoe UI", 11, "bold"))
+    task_id = tree.item(selected[0])["values"][0]
+    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    refresh_tasks()
 
-        self.create_widgets()
-        self.display_tasks()
+def mark_complete():
+    selected = tree.selection()
+    if not selected:
+        messagebox.showinfo("Select", "Please select a task to mark as complete.")
+        return
 
-    def create_widgets(self):
-        # Entry Frame
-        frame = tk.Frame(self.root, padx=10, pady=10)
-        frame.pack(fill=tk.X)
+    task_id = tree.item(selected[0])["values"][0]
+    cursor.execute("UPDATE tasks SET status = 'Completed' WHERE id = ?", (task_id,))
+    conn.commit()
+    refresh_tasks()
 
-        tk.Label(frame, text="Title:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.title_entry = tk.Entry(frame, width=30)
-        self.title_entry.grid(row=0, column=1, padx=5, pady=5)
+def refresh_tasks():
+    for item in tree.get_children():
+        tree.delete(item)
 
-        tk.Label(frame, text="Description:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.desc_entry = tk.Entry(frame, width=30)
-        self.desc_entry.grid(row=1, column=1, padx=5, pady=5)
+    cursor.execute("SELECT * FROM tasks")
+    for row in cursor.fetchall():
+        status_style = "success" if row[5] == "Completed" else "warning"
+        tree.insert("", END, values=row, tags=(status_style,))
+    style_rows()
 
-        tk.Label(frame, text="Due Date (YYYY-MM-DD):").grid(row=0, column=2, padx=5, pady=5, sticky="w")
-        self.due_entry = tk.Entry(frame, width=20)
-        self.due_entry.grid(row=0, column=3, padx=5, pady=5)
+def style_rows():
+    tree.tag_configure("success", background="#d4edda")
+    tree.tag_configure("warning", background="#fff3cd")
 
-        tk.Label(frame, text="Priority:").grid(row=1, column=2, padx=5, pady=5, sticky="w")
-        self.priority_combo = ttk.Combobox(frame, values=["Low", "Medium", "High"], state="readonly", width=18)
-        self.priority_combo.grid(row=1, column=3, padx=5, pady=5)
-        self.priority_combo.set("Medium")
+# GUI Window
+app = ttk.Window(themename="superhero")
+app.title("Smart Task Manager")
+app.geometry("900x500")
+app.resizable(False, False)
 
-        # Button Frame
-        btn_frame = tk.Frame(self.root, pady=10)
-        btn_frame.pack()
+# Variables
+title_var = StringVar()
+desc_var = StringVar()
+date_var = StringVar()
+priority_var = StringVar(value="Medium")
 
-        tk.Button(btn_frame, text="Add Task", width=15, command=self.add_task).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="Delete Task", width=15, command=self.delete_task).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="Mark Complete", width=15, command=self.mark_complete).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="Refresh", width=15, command=self.display_tasks).pack(side=tk.LEFT, padx=10)
+# Inputs
+ttk.Label(app, text="Title:").place(x=20, y=15)
+ttk.Entry(app, textvariable=title_var, width=30).place(x=80, y=15)
 
-        # Task Display
-        self.tree = ttk.Treeview(self.root, columns=("ID", "Title", "Due", "Priority", "Status"), show="headings")
-        self.tree.heading("ID", text="ID")
-        self.tree.heading("Title", text="Title")
-        self.tree.heading("Due", text="Due Date")
-        self.tree.heading("Priority", text="Priority")
-        self.tree.heading("Status", text="Status")
+ttk.Label(app, text="Description:").place(x=20, y=45)
+ttk.Entry(app, textvariable=desc_var, width=30).place(x=100, y=45)
 
-        self.tree.column("ID", width=50)
-        self.tree.column("Title", width=300)
-        self.tree.column("Due", width=150)
-        self.tree.column("Priority", width=100)
-        self.tree.column("Status", width=100)
+ttk.Label(app, text="Due Date (YYYY-MM-DD):").place(x=400, y=15)
+ttk.Entry(app, textvariable=date_var, width=20).place(x=580, y=15)
 
-        self.tree.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+ttk.Label(app, text="Priority:").place(x=400, y=45)
+ttk.Combobox(app, textvariable=priority_var, values=["Low", "Medium", "High"], width=17).place(x=470, y=45)
 
-    def add_task(self):
-        title = self.title_entry.get()
-        desc = self.desc_entry.get()
-        due = self.due_entry.get()
-        priority = self.priority_combo.get()
+# Buttons
+ttk.Button(app, text="Add Task", bootstyle="primary", command=add_task).place(x=150, y=90)
+ttk.Button(app, text="Delete Task", bootstyle="danger", command=delete_task).place(x=270, y=90)
+ttk.Button(app, text="Mark Complete", bootstyle="success", command=mark_complete).place(x=400, y=90)
+ttk.Button(app, text="Refresh", bootstyle="info", command=refresh_tasks).place(x=550, y=90)
 
-        if not title or not due:
-            messagebox.showerror("Error", "Title and Due Date are required!")
-            return
+# Treeview for Task Table
+cols = ("ID", "Title", "Description", "Due Date", "Priority", "Status")
+tree = ttk.Treeview(app, columns=cols, show="headings", height=15, bootstyle="secondary")
 
-        try:
-            datetime.strptime(due, "%Y-%m-%d")
-        except ValueError:
-            messagebox.showerror("Error", "Invalid date format! Use YYYY-MM-DD.")
-            return
+for col in cols:
+    tree.heading(col, text=col)
+    tree.column(col, anchor="center", width=130)
 
-        conn = sqlite3.connect('tasks.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO tasks (title, description, due_date, priority) VALUES (?, ?, ?, ?)",
-                  (title, desc, due, priority))
-        conn.commit()
-        conn.close()
-        self.display_tasks()
-        self.clear_entries()
+tree.place(x=20, y=140, width=860, height=330)
+refresh_tasks()
 
-    def delete_task(self):
-        selected = self.tree.selection()
-        if not selected:
-            return
-
-        task_id = self.tree.item(selected[0])['values'][0]
-        conn = sqlite3.connect('tasks.db')
-        c = conn.cursor()
-        c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-        conn.commit()
-        conn.close()
-        self.display_tasks()
-
-    def mark_complete(self):
-        selected = self.tree.selection()
-        if not selected:
-            return
-
-        task_id = self.tree.item(selected[0])['values'][0]
-        conn = sqlite3.connect('tasks.db')
-        c = conn.cursor()
-        c.execute("UPDATE tasks SET status='Completed' WHERE id=?", (task_id,))
-        conn.commit()
-        conn.close()
-        self.display_tasks()
-
-    def display_tasks(self):
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-
-        conn = sqlite3.connect('tasks.db')
-        c = conn.cursor()
-        c.execute("SELECT id, title, due_date, priority, status FROM tasks")
-        rows = c.fetchall()
-        conn.close()
-
-        for row in rows:
-            self.tree.insert('', 'end', values=row)
-
-    def clear_entries(self):
-        self.title_entry.delete(0, tk.END)
-        self.desc_entry.delete(0, tk.END)
-        self.due_entry.delete(0, tk.END)
-        self.priority_combo.set("Medium")
-
-if __name__ == '__main__':
-    init_db()
-    root = tk.Tk()
-    app = TaskManager(root)
-    root.mainloop()
+app.mainloop()
